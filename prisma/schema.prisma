@@ -1,0 +1,25 @@
+// prisma/schema.prisma
+//
+// Prisma v7 schema for Travel Planner SaaS.
+//
+// Breaking changes from v5/v6:
+//   - generator provider is now "prisma-client" (not "prisma-client-js")
+//   - output path is required; client goes to src/generated/prisma
+//   - datasource url is NO LONGER set here; it lives in prisma.config.ts
+//     (see https://pris.ly/d/config-datasource)
+//   - PrismaClient is constructed with a PrismaPg adapter (see lib/prisma.ts)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Models will be added in task 2.1 (Write the complete Prisma schema).
+// This file intentionally has no models yet -- it only wires up the generator
+// so that `prisma generate` can be tested.
+// ---------------------------------------------------------------------------
