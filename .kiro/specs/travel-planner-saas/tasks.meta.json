@@ -68,6 +68,35 @@
         "executionId": "2a1e6bfb-2b4b-4546-9500-c0ee3c7ce7eb",
         "chatSessionId": "sess_ed398bbf-6eb1-4e44-ae75-7f8331d0e1df",
         "timestamp": 1790527297636
+      },
+      {
+        "executionId": "0013642e-2ec6-40f1-ac93-726d7655d517",
+        "chatSessionId": "sess_ed398bbf-6eb1-4e44-ae75-7f8331d0e1df",
+        "timestamp": 1790529386346
+      }
+    ],
+    "3.3 Create Auth.js route handler and Pusher auth endpoint": [
+      {
+        "executionId": "a2e2d20f-2c88-4d9c-b12a-ff11f4108c0f",
+        "chatSessionId": "sess_bbf8bf00-a08d-4e8f-9c74-20e4ebafd1fb",
+        "timestamp": 1790529589148
+      },
+      {
+        "executionId": "a2e2d20f-2c88-4d9c-b12a-ff11f4108c0f",
+        "chatSessionId": "sess_bbf8bf00-a08d-4e8f-9c74-20e4ebafd1fb",
+        "timestamp": 1790529815226
+      }
+    ],
+    "3.4 Implement route protection middleware": [
+      {
+        "executionId": "bfae2a32-0b88-4c13-ba9a-9a845e254567",
+        "chatSessionId": "sess_ce8e4b40-35a0-4bb4-a081-be2dbc71001d",
+        "timestamp": 1790529883262
+      },
+      {
+        "executionId": "bfae2a32-0b88-4c13-ba9a-9a845e254567",
+        "chatSessionId": "sess_ce8e4b40-35a0-4bb4-a081-be2dbc71001d",
+        "timestamp": 1790530476002
       }
     ]
   }

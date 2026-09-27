@@ -50,7 +50,7 @@ This plan scaffolds a full-stack Next.js (App Router, TypeScript) application fo
     - Block after 5 consecutive failures within 10 minutes; enforce a 15-minute block
     - _Requirements: 1.9_
 
-  - [-] 3.2 Configure Auth.js v5
+  - [x] 3.2 Configure Auth.js v5
     - Write `src/lib/auth.ts` exporting `{ handlers, auth, signIn, signOut }`
     - Configure `PrismaAdapter`, `session: { strategy: 'jwt', maxAge: 86400 }`
     - Add `Google` provider and `Credentials` provider
@@ -58,12 +58,12 @@ This plan scaffolds a full-stack Next.js (App Router, TypeScript) application fo
     - Add `jwt` and `session` callbacks to propagate `user.id` into the token and session
     - _Requirements: 1.4, 1.5, 1.6, 1.7, 1.9, 2.1, 2.2, 2.3_
 
-  - [ ] 3.3 Create Auth.js route handler and Pusher auth endpoint
+  - [x] 3.3 Create Auth.js route handler and Pusher auth endpoint
     - Write `src/app/api/auth/[...nextauth]/route.ts` that re-exports `handlers` from `lib/auth.ts`
     - Write `src/app/api/pusher/auth/route.ts`: validate session via `auth()`, verify `TripMember` membership for the requested channel, sign and return Pusher channel auth response with HTTP 403 for non-members
     - _Requirements: 2.1, 7.6, 16.1, 16.3_
 
-  - [ ] 3.4 Implement route protection middleware
+  - [x] 3.4 Implement route protection middleware
     - Write `src/middleware.ts` using `auth` from `lib/auth.ts`
     - Allow public paths: `/login`, `/register`, `/api/auth`
     - Redirect unauthenticated requests to `/login`
