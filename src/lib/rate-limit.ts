@@ -1,91 +1,180 @@
 ﻿/**
  * Redis-backed login rate limiter (Requirement 1.9).
  *
- * Uses Upstash Redis REST API via the @upstash/redis client pattern:
- * raw fetch calls against UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN.
- * These credentials are server-only and must never be sent to the browser.
+ * Uses the Upstash Redis REST API directly via fetch — no additional package
+ * required. Credentials are accessed from server-only environment variables
+ * and are never sent to the browser.
  *
- * Limits: 5 failed attempts per IP per 10-minute window -> 15-minute block.
+ * Logic:
+ *  - 5 consecutive failed attempts from the same IP within 10 minutes
+ *    triggers a 15-minute block.
+ *  - checkLoginRateLimit(ip) — throws RateLimitError if the IP is blocked.
+ *  - recordFailedAttempt(ip) — increments the failure counter; applies block
+ *    once the threshold is crossed.
+ *  - resetAttempts(ip)       — clears counter and block on successful login.
+ *
+ * Graceful degradation: if Redis credentials are absent (e.g., local dev
+ * without .env.local), rate limiting is silently skipped rather than
+ * crashing the application.
  */
 
 const MAX_ATTEMPTS = 5;
-const WINDOW_SECONDS = 10 * 60;   // 10 minutes
-const BLOCK_SECONDS = 15 * 60;    // 15 minutes
+const WINDOW_SECONDS = 10 * 60; // 10 minutes
+const BLOCK_SECONDS = 15 * 60; // 15 minutes
 
-/** Key for the failed-attempt counter. */
-function attemptsKey(ip: string) {
+// ---------------------------------------------------------------------------
+// Error type
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown by checkLoginRateLimit when an IP is temporarily blocked.
+ * Auth actions should catch this and return an appropriate ActionResult error.
+ *
+ * NOTE: Once src/lib/errors.ts (task 4) introduces AppError, callers may
+ * translate this into AppError('UNAUTHORIZED', ...) at the action layer.
+ */
+export class RateLimitError extends Error {
+  constructor(
+    message = 'Too many failed login attempts. Please try again in 15 minutes.',
+  ) {
+    super(message);
+    this.name = 'RateLimitError';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Redis key helpers
+// ---------------------------------------------------------------------------
+
+/** Tracks the number of consecutive failed attempts for an IP. */
+function attemptsKey(ip: string): string {
   return `login:attempts:${ip}`;
 }
 
-/** Key for an explicit block flag (set after threshold is crossed). */
-function blockKey(ip: string) {
+/** Set when an IP has been blocked; TTL controls how long the block lasts. */
+function blockKey(ip: string): string {
   return `login:blocked:${ip}`;
 }
 
 // ---------------------------------------------------------------------------
-// Upstash REST helpers -- secrets stay server-side
+// Upstash REST helpers
+// All commands are issued as GET requests against the path-based REST API.
+// Ref: https://upstash.com/docs/redis/features/restapi
 // ---------------------------------------------------------------------------
 
-type UpstashResponse<T> = { result: T };
-
-async function redisGet<T>(key: string): Promise<T | null> {
+function getRedisConfig(): { url: string; token: string } | null {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-
   if (!url || !token) {
-    // If Redis is not configured, skip rate limiting rather than crashing.
-    // Log a warning (key name only, no secret values).
     console.warn(
       '[rate-limit] UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN is not set. ' +
         'Rate limiting is disabled.',
     );
     return null;
   }
-
-  const res = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) return null;
-  const json: UpstashResponse<T | null> = await res.json();
-  return json.result;
+  return { url, token };
 }
 
-async function redisSetEx(key: string, ttlSeconds: number, value: string): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return;
+type UpstashResponse<T> = { result: T };
 
-  await fetch(`${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}/ex/${ttlSeconds}`, {
-    method: 'GET', // Upstash REST uses GET for simple set commands
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+/** GET /get/{key} → string value or null */
+async function redisGet(key: string): Promise<string | null> {
+  const config = getRedisConfig();
+  if (!config) return null;
+
+  try {
+    const res = await fetch(
+      `${config.url}/get/${encodeURIComponent(key)}`,
+      {
+        headers: { Authorization: `Bearer ${config.token}` },
+        cache: 'no-store',
+      },
+    );
+    if (!res.ok) return null;
+    const json: UpstashResponse<string | null> = await res.json();
+    return json.result;
+  } catch {
+    return null;
+  }
 }
 
+/** GET /incr/{key} → new integer value after increment */
 async function redisIncr(key: string): Promise<number> {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return 0;
+  const config = getRedisConfig();
+  if (!config) return 0;
 
-  const res = await fetch(`${url}/incr/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) return 0;
-  const json: UpstashResponse<number> = await res.json();
-  return json.result;
+  try {
+    const res = await fetch(
+      `${config.url}/incr/${encodeURIComponent(key)}`,
+      {
+        headers: { Authorization: `Bearer ${config.token}` },
+        cache: 'no-store',
+      },
+    );
+    if (!res.ok) return 0;
+    const json: UpstashResponse<number> = await res.json();
+    return json.result;
+  } catch {
+    return 0;
+  }
 }
 
-async function redisDel(key: string): Promise<void> {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return;
+/** GET /expire/{key}/{ttl} → sets expiry on an existing key */
+async function redisExpire(key: string, ttlSeconds: number): Promise<void> {
+  const config = getRedisConfig();
+  if (!config) return;
 
-  await fetch(`${url}/del/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+  try {
+    await fetch(
+      `${config.url}/expire/${encodeURIComponent(key)}/${ttlSeconds}`,
+      {
+        headers: { Authorization: `Bearer ${config.token}` },
+        cache: 'no-store',
+      },
+    );
+  } catch {
+    // Best-effort: if expire fails, the key will persist until Redis eviction
+  }
+}
+
+/** GET /set/{key}/{value}/ex/{ttl} → sets key with value and TTL */
+async function redisSetEx(
+  key: string,
+  ttlSeconds: number,
+  value: string,
+): Promise<void> {
+  const config = getRedisConfig();
+  if (!config) return;
+
+  try {
+    await fetch(
+      `${config.url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}/ex/${ttlSeconds}`,
+      {
+        headers: { Authorization: `Bearer ${config.token}` },
+        cache: 'no-store',
+      },
+    );
+  } catch {
+    // Best-effort
+  }
+}
+
+/** GET /del/{key} → deletes a key */
+async function redisDel(key: string): Promise<void> {
+  const config = getRedisConfig();
+  if (!config) return;
+
+  try {
+    await fetch(
+      `${config.url}/del/${encodeURIComponent(key)}`,
+      {
+        headers: { Authorization: `Bearer ${config.token}` },
+        cache: 'no-store',
+      },
+    );
+  } catch {
+    // Best-effort
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,42 +182,44 @@ async function redisDel(key: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * Checks whether the IP is currently blocked.
- * Throws a rate-limit error (to be caught by the auth action) if blocked.
+ * Checks whether the given IP is currently rate-limited.
+ *
+ * @throws {RateLimitError} if the IP is blocked due to too many failed attempts.
  */
 export async function checkLoginRateLimit(ip: string): Promise<void> {
-  const blocked = await redisGet<string>(blockKey(ip));
-  if (blocked) {
-    throw new Error(
-      'Too many failed login attempts. Your access has been temporarily blocked for 15 minutes.',
-    );
+  const blocked = await redisGet(blockKey(ip));
+  if (blocked !== null) {
+    throw new RateLimitError();
   }
 }
 
 /**
  * Records a failed login attempt for the given IP.
- * Blocks the IP for BLOCK_SECONDS once MAX_ATTEMPTS is reached.
+ *
+ * - Increments the failure counter with a 10-minute sliding window.
+ * - Once MAX_ATTEMPTS is reached, sets a 15-minute block and clears the counter.
  */
 export async function recordFailedAttempt(ip: string): Promise<void> {
   const key = attemptsKey(ip);
   const count = await redisIncr(key);
 
   if (count === 1) {
-    // First attempt in this window -- set the expiry.
-    await redisSetEx(key, WINDOW_SECONDS, String(count));
+    // First attempt in this window — set the 10-minute expiry.
+    // Uses EXPIRE rather than SET so we don't reset the counter value.
+    await redisExpire(key, WINDOW_SECONDS);
   }
 
   if (count >= MAX_ATTEMPTS) {
+    // Threshold crossed — block the IP for 15 minutes and clear the counter.
     await redisSetEx(blockKey(ip), BLOCK_SECONDS, '1');
-    await redisDel(key); // clean up the counter
+    await redisDel(key);
   }
 }
 
 /**
- * Clears any existing failed-attempt counters for the IP after a
- * successful login.
+ * Clears all rate-limit state for the given IP after a successful login.
+ * Should be called immediately after a user authenticates successfully.
  */
 export async function resetAttempts(ip: string): Promise<void> {
-  await redisDel(attemptsKey(ip));
-  await redisDel(blockKey(ip));
+  await Promise.all([redisDel(attemptsKey(ip)), redisDel(blockKey(ip))]);
 }

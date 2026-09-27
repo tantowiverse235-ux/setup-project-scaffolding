@@ -17,8 +17,8 @@ This plan scaffolds a full-stack Next.js (App Router, TypeScript) application fo
   - Add `vitest.config.ts` with path aliases matching `tsconfig.json`
   - _Requirements: 17.1, 17.2, 17.3, 17.4, 17.5_
 
-- [ ] 2. Prisma schema and database migrations
-  - [ ] 2.1 Write the complete Prisma schema
+- [x] 2. Prisma schema and database migrations
+  - [x] 2.1 Write the complete Prisma schema
     - Define `datasource db` (postgresql) and `generator client`
     - Add Auth.js required models: `User`, `Account`, `Session`, `VerificationToken`
     - Add trip models: `Trip` (with `TripType` enum), `TripMember` (with `TripRole` enum), `InvitationLink`
@@ -28,29 +28,29 @@ This plan scaffolds a full-stack Next.js (App Router, TypeScript) application fo
     - Enforce all unique constraints: `TripMember(tripId, userId)`, `ExpenseSplit(expenseId, memberId)`, `Account(provider, providerAccountId)`
     - _Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7, 17.6_
 
-  - [ ] 2.2 Create and run the initial Prisma migration
+  - [x] 2.2 Create and run the initial Prisma migration
     - Run `prisma migrate dev --name init` to generate SQL migration file
     - Verify all tables and constraints exist in the database
     - _Requirements: 15.1–15.7_
 
-  - [ ] 2.3 Add pg_trgm extension and GIN indexes for place search
+  - [x] 2.3 Add pg_trgm extension and GIN indexes for place search
     - Create a second migration that enables `pg_trgm` extension
     - Add `CREATE INDEX place_name_trgm ON "Place" USING GIN (name gin_trgm_ops)`
     - Add `CREATE INDEX place_city_trgm ON "Place" USING GIN (city gin_trgm_ops)`
     - _Requirements: 14.9_
 
-  - [ ] 2.4 Create the Prisma client singleton
+  - [x] 2.4 Create the Prisma client singleton
     - Write `src/lib/prisma.ts` that exports a single `PrismaClient` instance, reusing it across hot-reloads in development
     - _Requirements: 17.3_
 
 - [ ] 3. Authentication infrastructure
-  - [ ] 3.1 Implement Redis-backed login rate limiter
+  - [x] 3.1 Implement Redis-backed login rate limiter
     - Write `src/lib/rate-limit.ts` using Upstash Redis REST client
     - Export `checkLoginRateLimit(ip)`, `recordFailedAttempt(ip)`, `resetAttempts(ip)`
     - Block after 5 consecutive failures within 10 minutes; enforce a 15-minute block
     - _Requirements: 1.9_
 
-  - [ ] 3.2 Configure Auth.js v5
+  - [-] 3.2 Configure Auth.js v5
     - Write `src/lib/auth.ts` exporting `{ handlers, auth, signIn, signOut }`
     - Configure `PrismaAdapter`, `session: { strategy: 'jwt', maxAge: 86400 }`
     - Add `Google` provider and `Credentials` provider

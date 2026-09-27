@@ -18,8 +18,220 @@ datasource db {
   provider = "postgresql"
 }
 
-// ---------------------------------------------------------------------------
-// Models will be added in task 2.1 (Write the complete Prisma schema).
-// This file intentionally has no models yet -- it only wires up the generator
-// so that `prisma generate` can be tested.
-// ---------------------------------------------------------------------------
+// ─── Auth.js required models ───────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String?  // null for OAuth-only accounts
+  displayName  String   @default("")
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts    Account[]
+  sessions    Session[]
+  tripMembers TripMember[]
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Trip models ───────────────────────────────────────────────────────────
+
+enum TripType {
+  Solo
+  Group
+}
+
+model Trip {
+  id              String   @id @default(cuid())
+  destinationCity String   @db.VarChar(100)
+  startDate       DateTime @db.Date
+  endDate         DateTime @db.Date
+  type            TripType
+  budgetTarget    BigInt?  // IDR whole units; null until set
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  members        TripMember[]
+  itineraryItems ItineraryItem[]
+  expenses       Expense[]
+
+  @@index([startDate, endDate])
+}
+
+enum TripRole {
+  Owner
+  Editor
+  Viewer
+}
+
+model TripMember {
+  id        String   @id @default(cuid())
+  tripId    String
+  userId    String
+  role      TripRole
+  createdAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  expensesPaid  Expense[]      @relation("payer")
+  expenseSplits ExpenseSplit[]
+
+  @@unique([tripId, userId])
+  @@index([tripId])
+  @@index([userId])
+}
+
+model InvitationLink {
+  id        String    @id @default(cuid())
+  tripId    String
+  role      TripRole  // Editor or Viewer only
+  token     String    @unique @default(cuid())
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([token])
+  @@index([tripId])
+}
+
+// ─── Itinerary models ──────────────────────────────────────────────────────
+
+enum ItemCategory {
+  Accommodation
+  Transportation
+  FoodBeverage  @map("Food & Beverage")
+  Attraction
+  Shopping
+  Others
+}
+
+model ItineraryItem {
+  id                String       @id @default(cuid())
+  tripId            String
+  date              DateTime     @db.Date
+  placeName         String       @db.VarChar(100)
+  address           String       @db.VarChar(255)
+  category          ItemCategory
+  notes             String?      @db.VarChar(1000)
+  estimatedDuration Int          // minutes, 1–1440
+  mapsUrl           String?
+  sortIndex         Int          // reordering key, unique per (tripId, date)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, date, sortIndex])
+}
+
+// ─── Expense models ────────────────────────────────────────────────────────
+
+enum ExpenseCategory {
+  Accommodation
+  Transportation
+  FoodBeverage       @map("Food & Beverage")
+  TicketsAttractions @map("Tickets/Attractions")
+  Shopping
+  Others
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  tripId      String
+  payerId     String          // TripMember.id
+  amount      BigInt          // IDR whole units, 1–999_999_999_999
+  category    ExpenseCategory
+  description String          @db.VarChar(255)
+  date        DateTime        @db.Date
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  trip   Trip       @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  payer  TripMember @relation("payer", fields: [payerId], references: [id], onDelete: Cascade)
+  splits ExpenseSplit[]
+
+  @@index([tripId])
+  @@index([payerId])
+}
+
+model ExpenseSplit {
+  id          String @id @default(cuid())
+  expenseId   String
+  memberId    String // TripMember.id
+  shareAmount BigInt // IDR whole units
+
+  expense Expense    @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  member  TripMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, memberId])
+  @@index([expenseId])
+  @@index([memberId])
+}
+
+// ─── Recommendation model ──────────────────────────────────────────────────
+// NOTE: GIN trigram indexes for Place.name and Place.city are created via a
+// custom migration (20260927160000_add_pg_trgm_indexes) using pg_trgm.
+// They cannot be expressed in the Prisma schema DSL and are managed manually.
+
+enum PlaceCategory {
+  Nature
+  Culture
+  Culinary
+  Adventure
+  Accommodation
+  Entertainment
+}
+
+model Place {
+  id          String        @id @default(cuid())
+  name        String        @db.VarChar(100)
+  city        String        @db.VarChar(100)
+  province    String
+  category    PlaceCategory
+  description String        @db.VarChar(500)
+  imageUrl    String?       @db.VarChar(2048)
+  createdAt   DateTime      @default(now())
+
+  @@index([name])
+  @@index([city])
+  @@index([category])
+}
